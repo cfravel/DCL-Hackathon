@@ -8,8 +8,6 @@ import { playSound } from "@decentraland/SoundController"
 //////////////////////////////////////////
 // Spawner factory functions
 
-log('start1')
-
 function spawnEntity(x: number, y: number, z: number, rx: number, ry: number, rz: number, sx: number, sy: number, sz: number) {
   // create the entity
   const entity = new Entity()
@@ -107,8 +105,28 @@ function spawnText(value: string, x: number, y: number, z: number) {
 //////////////////////////////////////////
 
 //////////////////////////////////////////
-// Create Colors
-//const BLACK = Color3.Black
+// Destinations
+const locations: Vector3[] = [];
+var numLocs = 0;
+
+function pushLocation(entity: Entity) {
+  let pos = entity.get(Transform).position
+  let dest = new Vector3(pos.x, pos.y, pos.z)
+  dest.y = 3 // 3m up in the tree.
+  //log ("pushEntity x,y,z= ", dest.x, dest.y, dest.z)
+  locations[numLocs++] = dest
+}
+
+function getNextLoc(loc1: number) {
+  // Pick a destination location from locations[], but not the current loc1
+  let locIndex : number = loc1 + 1 //!CF todo : For now just rotate to the next location, but later make it a random walk around the array.
+  //let locIndex: number = loc1 + Math.random()*(numLocs-1) // this doesn't work.  Math.random() seems to return the same value on each call.  And the result of this calculation gives a float with decimals, which when converted to a string doesn't index the array to any existing value
+  while (locIndex >= locations.length) {
+    locIndex -= locations.length // wrap around from beginning
+  }
+  return locIndex
+}
+
 
 //////////////////////////////////////////
 // Create Scene Materials
@@ -122,13 +140,13 @@ grassyFineMaterial.albedoColor = new Color3(1, 1, 1)
 // Load Model Shapes
 
 // Trees
-const treeAShape = new GLTFShape("models/Flora/TreeA/TreeA_Optimised_28_June_2018_A01.babylon.gltf")
-const treeBShape = new GLTFShape("models/Flora/TreeB/28_June_2018_Fir_Tree_B_optimised_A01.gltf")
-const treeCShape = new GLTFShape("models/Flora/TreeC/June_28_2018_Tree_C_OptimisedA01.gltf")
+const treeA_FirShape = new GLTFShape("models/Flora/TreeA_Fir/TreeA_Optimised_28_June_2018_A01.babylon.gltf")
+const treeB_PineShape = new GLTFShape("models/Flora/TreeB_Pine/28_June_2018_Fir_Tree_B_optimised_A01.gltf")
+const treeC_LocustShape = new GLTFShape("models/Flora/TreeC_Locust/June_28_2018_Tree_C_OptimisedA01.gltf")
 const treeD_SakuraShape = new GLTFShape("models/Flora/TreeD_Sakura/TreeD_Optimised_22_June_2018_A01.babylon.gltf")
 
 // Sparrow
-const sparrowShape = new GLTFShape("models/Animals/Sparrow/Sparrow-burung-pipit.gltf")
+const sparrowShape = new GLTFShape("models/Fauna/Sparrow/Sparrow-burung-pipit.gltf")
 
 //lady mannequins models
 const woman_SheerBeigheDressShape_8lHKzQ9Tg6G = new GLTFShape("models/People/8lHKzQ9Tg6G/8lHKzQ9Tg6G.glb")
@@ -144,11 +162,17 @@ const woman_SheerBeigheDressShape_8lHKzQ9Tg6G = new GLTFShape("models/People/8lH
 const groundPlane = spawnPlaneX(20, 0, 10,    90, 0, 0,     40, 20, 20)
 groundPlane.set(grassyFineMaterial)
 
-//const treeA = spawnGltfX(treeAShape, 5, 0, 5, 0, 0, 0, 0.15, 0.15, 0.15)
-//const treeB_Pine = spawnGltfX(treeBShape, 5, -4, 15, 0, 0, 0, 0.05, 0.05, 0.05)
-//const treeC = spawnGltfX(treeCShape, 35, -1, 5, 0, 0, 0, 0.05, 0.05, 0.05)
-//const treeD_Sakura = spawnGltfX(treeD_SakuraShape, 35, 0, 15, 0, 0, 0, 0.05, 0.05, 0.05)
+const treeA_Fir = spawnGltfX(treeA_FirShape, 5, 0, 5, 0, 0, 0, 0.15, 0.15, 0.15)
+const treeB_Pine = spawnGltfX(treeB_PineShape, 5, -4, 15, 0, 0, 0, 0.05, 0.05, 0.05)
+const treeC_Locust = spawnGltfX(treeC_LocustShape, 35, -1, 5, 0, 0, 0, 0.05, 0.05, 0.05)
+const treeD_Sakura = spawnGltfX(treeD_SakuraShape, 35, 0, 15, 0, 0, 0, 0.05, 0.05, 0.05)
 
+pushLocation(treeA_Fir)
+pushLocation(treeC_Locust)
+pushLocation(treeB_Pine)
+pushLocation(treeD_Sakura)
+
+//Fauna
 const sparrow = spawnGltfX(sparrowShape, 10, 2, 10, 0, 0, 0, 0.025, 0.025, 0.025)
 
 //!CF todo fix this up.  For now just force the bird to hide for the initial idle period
@@ -186,85 +210,93 @@ let clipFly = sparrow.get(GLTFShape).getClip("fly")
 
 
 
-
-
 //////////////////////////////////////////
 // Animation systems
 class BirdFlightSystem implements ISystem {
-    // init code
-    flyingState = false
+  // init code
+  flyingState = false
 
-    //!CF todo make this an array of trees.  Set them by the actual tree positions.
-    tree1Site = new Vector3(5, 8, 15) // 8 ft up in the Pine tree
-    tree2Site = new Vector3(35, 6, 15) // 6 ft up in the Sakura tree
-    idleTime = 5.0 //sec
-    currentIdleTime = 0.0
-    flyTime = 3.0  //sec
-    currentFlightTime = 0.0
+  //!CF todo make this an array of trees.  Set them by the actual tree positions.
+  locIndexBegin = 0
+  locIndexEnd = 1
+  idleTime = 9.0 //sec
+  currentIdleTime = 0.0
+  flyTime = 5.0  //sec
+  currentFlightTime = 0.0
 
-    v1 = this.tree1Site
-    v2 = this.tree2Site
-    dx = 0
-    dy = 0
+  //v1 = this.tree1Site
+  //v2 = this.tree2Site
+  dx = 0.0
+  dy = 0.0
+  dz = 0.0
 
-  update(dt: number) {
-    //log('update', 'flyingState', this.flyingState, 'currentFlightTime', this.currentFlightTime, 'currentIdletime', this.currentIdleTime)
-    if (this.flyingState == false) {
-      // Bird waits, hidden
-      this.currentIdleTime -= dt
-      if (this.currentIdleTime <= 0) {
-        log('start flying 1')
-        // set up the next flight
-        this.v1 = this.tree1Site
-        this.v2 = this.tree2Site
-        this.dx = this.tree2Site.x - this.tree1Site.x * (dt / this.flyTime)
-        this.dy = this.tree2Site.y - this.tree1Site.y * (dt / this.flyTime)
-        this.dx = this.tree2Site.z - this.tree1Site.z * (dt / this.flyTime)
-        this.currentFlightTime = this.flyTime
-        
-        // Move the bird to tree1Site
-        //sparrow.get(Transform).position.x += this.dx
-        //sparrow.get(Transform).position.y += this.dy
-        //sparrow.get(Transform).position.z += this.dz
+ 
 
-        // Aim the bird in the right direction
-        //!CF todo
+update(dt: number) {
+  if (this.flyingState == false) {
+    // Bird waits, hidden
+    if (this.currentIdleTime <= 0) {
+      log('start flying 1')
+      // set up the next flight
+      log("locIndexBegin, locIndexEnd", this.locIndexBegin, this.locIndexEnd)
+      let locBegin = locations[this.locIndexBegin]
+      let locEnd = locations[this.locIndexEnd]
+      // calculate the increments of flight distance per frame
+      this.dx = (locEnd.x - locBegin.x) * (dt / this.flyTime) // use the dt of this frame as typical.  probably about 1/30 sec or about 0.033 sec
+      this.dy = (locEnd.y - locBegin.y) * (dt / this.flyTime)
+      this.dz = (locEnd.z - locBegin.z) * (dt / this.flyTime)
 
-        // Make the bird visible
-        engine.addEntity(sparrow)
+      this.currentFlightTime = this.flyTime
+      
+      // Move the bird to start point, in case it isn't currently there (e.g. fron its original instantiation)
+      let birdPos = sparrow.get(Transform).position
+      birdPos.x = locBegin.x //!CF todo: could this be a Vector3 assigment to birdPos? as in:   sparrow.get(Transform).position = locBegin
+      birdPos.y = locBegin.y
+      birdPos.z = locBegin.z
 
-        // Start the animation
-        clipFly.play()
+      // Aim the bird in the right direction
+      //!CF todo
 
-        this.flyingState = true
-        log('start flying 2')
-      }
-      else {
-        this.currentIdleTime -= dt
-      }
+      // Make the bird visible
+      engine.addEntity(sparrow)
+
+      // Start the animation
+      clipFly.play()
+
+      this.flyingState = true
+      //log('start flying 2')
+
+      // set up the next route
+      this.locIndexBegin = this.locIndexEnd // new starting location will be the endpoint of this flight
+      this.locIndexEnd = getNextLoc(this.locIndexBegin) // get destination for next leg of flight, but make it not the current end point
+
     }
-    else
-    {
-    //fly
-    if (this.currentFlightTime <=0){
-        // stop the animation
-        clipFly.pause()
-        // Make the bird invisible
-        //engine.removeEntity(sparrow)
-        // end the flying state
-        this.flyingState = false
-        this.currentIdleTime = this.idleTime
-        log("stop flying")
-      }
-      else {
-        this.currentFlightTime -= dt
-        // move the bird by dx, dy, dz
-        //sparrow.get(Transform).position.x += this.dx
-        //sparrow.get(Transform).position.y += this.dy
-        //sparrow.get(Transform).position.z += this.dz
-      }
+    else {
+      this.currentIdleTime -= dt
     }
   }
+  else
+  {
+  //fly
+  if (this.currentFlightTime <=0){
+      // stop the animation
+      clipFly.pause()
+      // Make the bird invisible
+      engine.removeEntity(sparrow)
+      // end the flying state
+      this.flyingState = false
+      this.currentIdleTime = this.idleTime
+      //log("stop flying")
+    }
+    else {
+      this.currentFlightTime -= dt
+      // move the bird by dx, dy, dz
+      sparrow.get(Transform).position.x += this.dx
+      sparrow.get(Transform).position.y += this.dy
+      sparrow.get(Transform).position.z += this.dz
+    }
+  }
+}
 }
 
 // Add a new instance of the system to the engine
@@ -285,10 +317,10 @@ sparrow.add(source)
 source.playing = true
 */
 
-log("finis1")
+//log("finis1")
 //!CF todo: the execute task call seems not to return, so anything AFTER it won't work
 
-/*
+
 executeTask(async () => {
   try {
     await playSound("sounds/Animals/Birds/431372__pdc4tune__backyard-birds.mp3", {
@@ -299,4 +331,3 @@ executeTask(async () => {
     log("failed to play sound")
   }
 })
-*/
